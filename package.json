@@ -8,6 +8,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "start": "node server.mjs",
+    "data:export": "node scripts/export-static.mjs",
+    "typecheck": "tsc -p tsconfig.json",
     "cf:dev": "wrangler pages dev dist --port 8788",
     "deploy:cf": "npm run build && wrangler pages deploy dist --project-name job-camp --commit-dirty=true"
   },
