@@ -1,9 +1,17 @@
 node_modules/
 dist/
 .vite/
+.wrangler/
 
 # 抓取原始数据（体积大，可按脚本重新生成）
 scraper/data/
+
+# 验证用截图
+pages-local.png
+detail-*.png
+list-*.png
+live-*.png
+*-local.png
 
 # 系统/编辑器
 .DS_Store
