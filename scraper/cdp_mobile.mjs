@@ -1,5 +1,5 @@
 // 手机视口检查：iPhone 尺寸下的布局、横向溢出、触控可用性
-const CDP = 'http://127.0.0.1:9227'
+const CDP = process.env.CDP || 'http://127.0.0.1:9228'
 const URL_LIVE = process.env.TARGET || 'https://onepro07.github.io/job-camp/'
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
@@ -24,7 +24,7 @@ async function openPage(url, mobile) {
     })
   }
   await send('Page.navigate', { url })
-  await sleep(9000)
+  await sleep(18000)
   const ev = async (expr) => {
     const r = await send('Runtime.evaluate', { expression: expr, returnByValue: true, awaitPromise: true })
     if (r.exceptionDetails) return 'EXC:' + JSON.stringify(r.exceptionDetails).slice(0, 160)

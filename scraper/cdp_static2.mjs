@@ -1,6 +1,6 @@
 // 静态模式二次校验：总数、关键词过滤、分页
-const CDP = 'http://127.0.0.1:9226'
-const BASE = 'http://127.0.0.1:5199/?data=static'
+const CDP = process.env.CDP || 'http://127.0.0.1:9226'
+const BASE = process.env.TARGET || 'http://127.0.0.1:5199/?data=static'
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
 async function main() {

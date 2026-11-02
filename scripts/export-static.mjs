@@ -23,8 +23,10 @@ const PAGE = 1000
 const ENDPOINT = 'https://job-camp.app.workbuddy.host'
 const KEY = 'wbpk_nwNlZ1h7pOQ3LHX58Ws34j_vFqMJilV8JocSACXhnlJ4wntdIAAZaN3'
 
-// 与 src/api.ts 的 JOB_SELECT 保持一致：公司走关联表
-const SELECT_LIGHT = 'id,title,city,district,experience,education,job_type,tags,salary_min,salary_max,salary_months,published_at,created_at,source,source_id,source_url,company:companies(name,industry)'
+// 索引只保留列表页真正要用的列：筛选（city/experience/tags/company）、
+// 排序（published_at）、展示（title）。其余字段（薪资、学历、职责原文）都在分片里，
+// 冗余放进索引会让首屏多下载一两兆。
+const SELECT_LIGHT = 'id,title,city,experience,tags,published_at,company:companies(name,industry)'
 const SELECT_FULL = '*,company:companies(id,name,industry,company_size,city,website,intro)'
 
 async function fetchPage(select, offset) {
