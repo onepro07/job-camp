@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { cloud } from './cloud'
 import {
   listJobs, getFacets, getJob, listFavoriteIds, addFavorite, removeFavorite,
-  listApplications, createApplication,
+  listApplications, createApplication, getDataMode,
 } from './api'
 import type { Job, Application } from './types'
 import { SOURCE_LABEL, fmtDate } from './types'
@@ -28,6 +28,10 @@ export default function App() {
   const [user, setUser] = useState<{ id: string; name?: string } | null>(null)
   const [authReady, setAuthReady] = useState(false)
   const [loginOpen, setLoginOpen] = useState(false)
+  /** 静态部署（GitHub Pages）下没有登录能力，收藏/投递落在本机 */
+  const [staticMode, setStaticMode] = useState(false)
+
+  useEffect(() => { getDataMode().then((m) => setStaticMode(m === 'static')).catch(() => {}) }, [])
 
   /* ---------- 列表 ---------- */
   const [jobs, setJobs] = useState<Job[]>([])
@@ -136,11 +140,19 @@ export default function App() {
     getFacets().then(setFacets).catch(() => {})
   }, [])
 
-  /* ---------- 登录后加载个人数据 ---------- */
+  /* ---------- 加载个人数据 ----------
+     静态模式（GitHub Pages）没有可用的登录态，收藏/投递存在本机 localStorage，
+     不依赖 user，所以这里不能直接按「未登录就清空」处理。 */
   useEffect(() => {
-    if (!user) { setFavIds([]); setApps([]); return }
-    listFavoriteIds().then(setFavIds).catch(() => {})
-    listApplications().then(setApps).catch(() => {})
+    let alive = true
+    ;(async () => {
+      const mode = await getDataMode()
+      if (!alive) return
+      if (!user && mode !== 'static') { setFavIds([]); setApps([]); return }
+      listFavoriteIds().then((v) => { if (alive) setFavIds(v) }).catch(() => {})
+      listApplications().then((v) => { if (alive) setApps(v) }).catch(() => {})
+    })()
+    return () => { alive = false }
   }, [user])
 
   const filtered = useMemo(
@@ -154,7 +166,7 @@ export default function App() {
   }
 
   const toggleFav = async (job: Job) => {
-    if (!user) { setLoginOpen(true); return }
+    if (!user && (await getDataMode()) !== 'static') { setLoginOpen(true); return }
     const has = favIds.includes(job.id)
     try {
       if (has) { await removeFavorite(job.id); setFavIds((p) => p.filter((i) => i !== job.id)); notify('已取消收藏') }
@@ -173,7 +185,7 @@ export default function App() {
   }
 
   const markApplied = async (job: Job) => {
-    if (!user) { setLoginOpen(true); return }
+    if (!user && (await getDataMode()) !== 'static') { setLoginOpen(true); return }
     if (apps.some((a) => a.job_id === job.id)) { notify('这个岗位已经在投递记录里了'); return }
     try {
       await createApplication({
@@ -187,6 +199,10 @@ export default function App() {
       notify('已加入投递记录')
     } catch (e: any) { notify(e?.message ?? '记录失败') }
   }
+
+  // 列表页不需要「分享/标记已投」入口（详情页已有），此处保留供将来扩展
+  void shareJob
+  void markApplied
 
   /**
    * 详情链接：带上当前筛选条件，详情页返回时列表视图不丢。
@@ -227,6 +243,10 @@ export default function App() {
                 <span className="uname">{user.name ?? '已登录'}</span>
                 <button className="btn-ghost" onClick={async () => { await cloud.auth.signOut(); setUser(null); notify('已退出') }}>退出</button>
               </>
+            ) : staticMode ? (
+              <span className="local-badge" title="静态部署版本：收藏与投递记录保存在本机浏览器，不跨设备同步">
+                本机收藏
+              </span>
             ) : (
               <button className="btn-primary sm" onClick={() => setLoginOpen(true)}>登录 / 注册</button>
             )}
@@ -383,7 +403,7 @@ export default function App() {
       <section className="apps" id="apps">
         <h2>投递记录</h2>
         {apps.length === 0 ? (
-          <p className="muted">{user ? '还没有记录。在岗位详情里点「标记已投递」会自动出现在这里。' : '登录后可记录投递进度。'}</p>
+          <p className="muted">{user || staticMode ? '还没有记录。在岗位详情里点「标记已投递」会自动出现在这里。' : '登录后可记录投递进度。'}</p>
         ) : (
           <div className="app-list">
             {apps.map((a) => (

@@ -1,4 +1,5 @@
 import { cloud } from './cloud'
+import { loadStaticIndex, loadStaticJob, loadStaticJobsByIds } from './staticData'
 import type { Job, Application } from './types'
 
 const JOB_SELECT = '*, company:companies(id,name,industry,company_size,city,website,intro)'
@@ -42,6 +43,28 @@ type JobIndexRow = {
 }
 
 let indexTask: Promise<JobIndexRow[]> | null = null
+let dataMode: 'cloud' | 'static' | null = null
+
+/**
+ * 当前走哪套数据源：
+ *   cloud  —— 官方域名或本地开发，直接连云数据库（数据实时）
+ *   static —— GitHub Pages 等第三方域名，读随页面分发的 JSON（数据为导出时的快照）
+ *
+ * 判断方式：先试静态索引，产物存在就用它；不存在（404）再回退云端。
+ * 这样同一份构建产物在三种环境下都能跑，不需要按部署目标分别打包。
+ */
+export async function getDataMode(): Promise<'cloud' | 'static'> {
+  if (dataMode) return dataMode
+  // 调试用：?data=static / ?data=cloud 可强制指定数据源，
+  // 便于在本地预览 GitHub Pages 的离线数据链路。
+  const forced = new URLSearchParams(location.search).get('data')
+  if (forced === 'static' || forced === 'cloud') {
+    dataMode = forced
+    return forced
+  }
+  dataMode = (await loadStaticIndex()) ? 'static' : 'cloud'
+  return dataMode
+}
 
 /**
  * 服务端单次最多返回 1000 行（网关有上限），所以索引要分页拉全，再按“企业轮转”重排：
@@ -50,6 +73,8 @@ let indexTask: Promise<JobIndexRow[]> | null = null
 function loadIndex(): Promise<JobIndexRow[]> {
   if (!indexTask) {
     indexTask = (async () => {
+      const staticIdx = await loadStaticIndex()
+      if (staticIdx) return staticIdx as JobIndexRow[]
       const all: JobIndexRow[] = []
       for (let from = 0; ; from += 1000) {
         const { data, error } = await cloud.database
@@ -137,19 +162,26 @@ export async function listJobs(f: JobFilters = {}): Promise<JobPage> {
   if (slice.length === 0) return { rows: [], total: hit.length }
 
   const ids = slice.map((r) => r.id)
-  const { data, error } = await cloud.database
-    .from('jobs')
-    .select(JOB_SELECT)
-    .in('id', ids)
-  if (error) throw error
+  let rows: Job[]
+  if ((await getDataMode()) === 'static') {
+    rows = await loadStaticJobsByIds(ids)
+  } else {
+    const { data, error } = await cloud.database
+      .from('jobs')
+      .select(JOB_SELECT)
+      .in('id', ids)
+    if (error) throw error
+    rows = (data ?? []) as unknown as Job[]
+  }
 
   const byId = new Map<number, Job>()
-  for (const row of (data ?? []) as unknown as Job[]) byId.set(row.id, row)
-  const rows = ids.map((id) => byId.get(id)).filter((r): r is Job => Boolean(r))
-  return { rows, total: hit.length }
+  for (const row of rows) byId.set(row.id, row)
+  const ordered = ids.map((id) => byId.get(id)).filter((r): r is Job => Boolean(r))
+  return { rows: ordered, total: hit.length }
 }
 
 export async function getJob(id: number): Promise<Job | null> {
+  if ((await getDataMode()) === 'static') return loadStaticJob(id)
   const { data, error } = await cloud.database
     .from('jobs')
     .select(JOB_SELECT)
@@ -201,27 +233,84 @@ export async function getFacets(): Promise<{
 
 /* ---------- 收藏 ---------- */
 
+/**
+ * SDK 的类型定义只覆盖了 jobs/companies，favorites 和 applications 在类型层面
+ * 推导成 never[]。这里给这两张表开一个宽松通道，运行时行为和原来完全一致。
+ */
+interface RawResult {
+  data?: unknown
+  error?: { code?: string; message?: string } | null
+}
+type RawQuery = Promise<RawResult> & {
+  order(column: string, opts?: { ascending?: boolean }): Promise<RawResult>
+}
+interface RawTable {
+  select(columns?: string): RawQuery
+  insert(values: Record<string, unknown>): Promise<RawResult>
+  delete(): { eq(column: string, value: unknown): Promise<RawResult> }
+  update(values: Record<string, unknown>): {
+    eq(column: string, value: unknown): { select(): Promise<RawResult> }
+  }
+}
+const rawTable = (name: string): RawTable =>
+  (cloud.database as unknown as { from(t: string): RawTable }).from(name)
+
+/**
+ * 静态模式（GitHub Pages）下没有可写的云端会话，收藏和投递记录落到 localStorage。
+ * 这样功能不消失，只是换设备不同步——比直接报错更可用。
+ */
+const FAV_KEY = 'job-camp:favorites'
+const APP_KEY = 'job-camp:applications'
+
+const readLocal = <T>(key: string, fallback: T): T => {
+  try {
+    const raw = localStorage.getItem(key)
+    return raw ? (JSON.parse(raw) as T) : fallback
+  } catch {
+    return fallback
+  }
+}
+
+const writeLocal = (key: string, value: unknown) => {
+  try {
+    localStorage.setItem(key, JSON.stringify(value))
+  } catch {
+    /* 隐私模式下写不进去，忽略即可 */
+  }
+}
+
 export async function listFavoriteIds(): Promise<number[]> {
-  const { data, error } = await cloud.database.from('favorites').select('job_id')
+  if ((await getDataMode()) === 'static') return readLocal<number[]>(FAV_KEY, [])
+  const { data, error } = await rawTable('favorites').select('job_id')
   if (error) return []
   return ((data ?? []) as { job_id: number }[]).map((r) => r.job_id)
 }
 
 export async function addFavorite(jobId: number): Promise<void> {
-  const { error } = await cloud.database.from('favorites').insert({ job_id: jobId })
+  if ((await getDataMode()) === 'static') {
+    const fav = new Set(readLocal<number[]>(FAV_KEY, []))
+    fav.add(jobId)
+    writeLocal(FAV_KEY, [...fav])
+    return
+  }
+  const { error } = await rawTable('favorites').insert({ job_id: jobId })
   if (error && error.code !== '23505') throw error
 }
 
 export async function removeFavorite(jobId: number): Promise<void> {
-  const { error } = await cloud.database.from('favorites').delete().eq('job_id', jobId)
+  if ((await getDataMode()) === 'static') {
+    writeLocal(FAV_KEY, readLocal<number[]>(FAV_KEY, []).filter((i) => i !== jobId))
+    return
+  }
+  const { error } = await rawTable('favorites').delete().eq('job_id', jobId)
   if (error) throw error
 }
 
 /* ---------- 投递 ---------- */
 
 export async function listApplications(): Promise<Application[]> {
-  const { data, error } = await cloud.database
-    .from('applications')
+  if ((await getDataMode()) === 'static') return readLocal<Application[]>(APP_KEY, [])
+  const { data, error } = await rawTable('applications')
     .select('*')
     .order('created_at', { ascending: false })
   if (error) throw error
@@ -234,7 +323,25 @@ export async function createApplication(input: {
   company_name: string | null
   job_city: string | null
 }): Promise<void> {
-  const { error } = await cloud.database.from('applications').insert({
+  if ((await getDataMode()) === 'static') {
+    const apps = readLocal<Application[]>(APP_KEY, [])
+    const now = new Date().toISOString()
+    apps.unshift({
+      id: Date.now(),
+      job_id: input.job_id,
+      company_name: input.company_name,
+      job_title: input.job_title,
+      job_city: input.job_city,
+      status: 'applied',
+      applied_at: now,
+      next_action: null,
+      next_action_at: null,
+      notes: null,
+    })
+    writeLocal(APP_KEY, apps)
+    return
+  }
+  const { error } = await rawTable('applications').insert({
     job_id: input.job_id,
     job_title: input.job_title,
     company_name: input.company_name,
@@ -245,8 +352,15 @@ export async function createApplication(input: {
 }
 
 export async function updateApplicationStatus(id: number, status: string): Promise<void> {
-  const { data, error } = await cloud.database
-    .from('applications')
+  if ((await getDataMode()) === 'static') {
+    const apps = readLocal<Application[]>(APP_KEY, [])
+    const hit = apps.find((a) => a.id === id)
+    if (!hit) throw new Error('记录不存在')
+    hit.status = status
+    writeLocal(APP_KEY, apps)
+    return
+  }
+  const { data, error } = await rawTable('applications')
     .update({ status, updated_at: new Date().toISOString() })
     .eq('id', id)
     .select()

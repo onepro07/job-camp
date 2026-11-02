@@ -76,6 +76,17 @@ input { font: inherit; }
   color: var(--brand); display: grid; place-items: center; font-size: 13px; font-weight: 600;
 }
 .uname { font-size: 13px; color: var(--ink2); max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 静态部署（GitHub Pages）没有登录能力，用这个标识说明收藏存在本机 */
+.local-badge {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 12px; color: var(--ink3);
+  padding: 5px 10px; border: 1px solid var(--line2); border-radius: 999px;
+  background: #fafafa; cursor: default;
+}
+.local-badge::before {
+  content: ''; width: 6px; height: 6px; border-radius: 50%;
+  background: #22c55e; flex: none;
+}
 
 /* ---------- 按钮 ---------- */
 .btn-primary {
