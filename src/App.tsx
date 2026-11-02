@@ -476,14 +476,14 @@ function JobDetailPage({ id }: { id: number }) {
 
   return (
     <div className="jd-page">
-      <header className="topbar">
+      <header className="topbar jd-topbar">
         <div className="topbar-in">
           <a className="brand" href={backHref}>
             <span className="brand-mark" aria-hidden="true" />
             <span className="brand-name">求职营地</span>
             <span className="brand-sub">岗位库</span>
           </a>
-          <nav className="nav">
+          <nav className="nav jd-nav">
             <a className="nav-item" href={backHref}>← 返回岗位库</a>
           </nav>
           <div className="userbox">
