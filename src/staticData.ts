@@ -33,15 +33,35 @@ let manifest: BucketMeta[] | null = null
 const bucketCache = new Map<string, Job[]>()
 
 /**
+ * 带重试的 JSON 读取。
+ *
+ * 为什么需要：新部署的站点第一次访问要走 CDN 回源，偶尔会超时。
+ * 一旦索引读取被判定成「不存在」，页面会退化到云端模式 —— 在 GitHub Pages 上
+ * 没有后端可用，结果就是一直停在「加载中」。多试一次成本极低，能避免这种白屏。
+ */
+async function fetchJson<T>(path: string, tries = 3): Promise<T> {
+  let lastErr: unknown
+  for (let i = 0; i < tries; i++) {
+    try {
+      const res = await fetch(path, i === 0 ? undefined : { cache: 'reload' })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      return (await res.json()) as T
+    } catch (e) {
+      lastErr = e
+      if (i < tries - 1) await new Promise((r) => setTimeout(r, 500 * (i + 1)))
+    }
+  }
+  throw lastErr
+}
+
+/**
  * 拉取静态索引；产物不存在时返回 null（调用方应回退到云端数据源）。
- * 用 HEAD 之外的一次 GET 探测：GitHub Pages 对不存在的文件返回 404，正好用来判断。
+ * 用一次 GET 探测：GitHub Pages 对不存在的文件返回 404，正好用来判断。
  */
 export async function loadStaticIndex(): Promise<JobIndexRow[] | null> {
   if (indexCache) return indexCache
   try {
-    const res = await fetch('data/index.json')
-    if (!res.ok) return null
-    const rows = (await res.json()) as JobIndexRow[]
+    const rows = await fetchJson<JobIndexRow[]>('data/index.json')
     if (!Array.isArray(rows) || rows.length === 0) return null
     indexCache = rows
     return rows
@@ -52,9 +72,7 @@ export async function loadStaticIndex(): Promise<JobIndexRow[] | null> {
 
 async function loadManifest(): Promise<BucketMeta[]> {
   if (manifest) return manifest
-  const res = await fetch('data/buckets.json')
-  if (!res.ok) throw new Error(`分片清单读取失败：HTTP ${res.status}`)
-  manifest = (await res.json()) as BucketMeta[]
+  manifest = await fetchJson<BucketMeta[]>('data/buckets.json')
   return manifest
 }
 
@@ -66,9 +84,7 @@ async function findBucket(id: number): Promise<Job | null> {
 
   let bucket = bucketCache.get(meta.file)
   if (!bucket) {
-    const res = await fetch(`data/${meta.file}`)
-    if (!res.ok) throw new Error(`${meta.file} 读取失败：HTTP ${res.status}`)
-    bucket = (await res.json()) as Job[]
+    bucket = await fetchJson<Job[]>(`data/${meta.file}`)
     bucketCache.set(meta.file, bucket)
   }
   return bucket.find((j) => j.id === id) ?? null
@@ -84,9 +100,11 @@ export async function loadStaticJobsByIds(ids: number[]): Promise<Job[]> {
   for (const meta of files) {
     let bucket = bucketCache.get(meta.file)
     if (!bucket) {
-      const res = await fetch(`data/${meta.file}`)
-      if (!res.ok) continue
-      bucket = (await res.json()) as Job[]
+      try {
+        bucket = await fetchJson<Job[]>(`data/${meta.file}`)
+      } catch {
+        continue
+      }
       bucketCache.set(meta.file, bucket)
     }
     for (const j of bucket) if (wanted.has(j.id)) rows.push(j)

@@ -1,5 +1,5 @@
 // 诊断：抓 console 报错、页面文本、以及 data/index.json 的实际请求结果
-const CDP = 'http://127.0.0.1:9228'
+const CDP = process.env.CDP || 'http://127.0.0.1:9228'
 const BASE = process.env.TARGET || 'https://job-camp.pages.dev/'
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
