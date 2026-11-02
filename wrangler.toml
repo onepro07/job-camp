@@ -1,0 +1,7 @@
+# Cloudflare Pages 配置（Git 集成或 wrangler pages deploy 都会读这里）
+name = "job-camp"
+compatibility_date = "2026-11-01"
+pages_build_output_dir = "dist"
+
+# 构建命令在 Pages 控制台里设：npm run build
+# 输出目录：dist

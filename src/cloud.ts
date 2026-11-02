@@ -1,8 +1,8 @@
 import { createWorkBuddyCloud } from '@tencent-ai/workbuddy-cloud-sdk'
-import { publicConfig } from './config'
+import { publicConfig, apiEndpoint } from './config'
 
 export const cloud = createWorkBuddyCloud({
-  endpoint: publicConfig.endpoint,
+  endpoint: apiEndpoint,
   oauthRelayBaseUrl: publicConfig.oauthRelayBaseUrl,
   publishableKey: publicConfig.publishableKey,
 })
